@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Road Damage Detector</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2f3a;
+    --text: #e7e9ee;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --d00: #4f8cff;   /* longitudinal crack */
+    --d10: #ffb547;   /* transverse crack */
+    --d20: #ff5c8a;   /* alligator crack */
+    --d40: #ff4444;   /* pothole */
+    font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 64px;
+  }
+  header { text-align: center; margin-bottom: 24px; }
+  h1 { font-size: 1.6rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  header p { color: var(--muted); margin: 0; font-size: 0.9rem; }
+
+  .mode-toggle {
+    display: flex;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+  }
+  .mode-toggle button {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    padding: 9px 20px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: 0.15s;
+  }
+  .mode-toggle button.active {
+    background: var(--accent);
+    color: white;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    width: 100%;
+    max-width: 720px;
+  }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .upload-zone:hover { border-color: var(--accent); }
+  .upload-zone p { margin: 8px 0 0; color: var(--muted); font-size: 0.85rem; }
+  .upload-zone svg { opacity: 0.6; }
+  input[type="file"] { display: none; }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    margin-top: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+    display: none;
+  }
+  .stage.visible { display: block; }
+  .stage img, .stage video { width: 100%; display: block; }
+  .stage canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  button.action {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  button.action.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button.action:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 10px;
+    min-height: 18px;
+  }
+  .status.error { color: var(--d40); }
+
+  .legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; }
+
+  .detections {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .det-row {
+    display: flex;
+    justify-content: space-between;
+    background: #12141a;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+  .det-row .cls { font-weight: 600; }
+  .det-row .conf { color: var(--muted); }
+
+  footer {
+    margin-top: 24px;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  .api-url {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-family: monospace;
+    display: inline-block;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛣️ Road Damage Detector</h1>
+  <p>Upload an image or use your webcam to detect cracks and potholes</p>
+</header>
+
+<div class="mode-toggle">
+  <button id="btnUploadMode" class="active">Upload Image</button>
+  <button id="btnWebcamMode">Use Webcam</button>
+</div>
+
+<div class="panel">
+
+  <!-- UPLOAD MODE -->
+  <div id="uploadPanel">
+    <div class="upload-zone" id="dropZone">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#8b93a3" stroke-width="1.5">
+        <path d="M12 16V4M12 4l-4 4M12 4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p><strong style="color:var(--text)">Click to upload</strong> a road image</p>
+      <p>JPG or PNG</p>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+
+    <div class="stage" id="imgStage">
+      <img id="previewImg">
+      <canvas id="imgCanvas"></canvas>
+    </div>
+
+    <div class="controls">
+      <button class="action" id="runImageBtn" disabled>Detect Defects</button>
+      <button class="action secondary" id="resetImageBtn" style="display:none;">Reset</button>
+    </div>
+  </div>
+
+  <!-- WEBCAM MODE -->
+  <div id="webcamPanel" style="display:none;">
+    <div class="stage visible" id="webcamStage">
+      <video id="webcamVideo" autoplay muted playsinline></video>
+      <canvas id="webcamCanvas"></canvas>
+    </div>
+    <div class="controls">
+      <button class="action" id="startWebcamBtn">Start Webcam</button>
+      <button class="action secondary" id="stopWebcamBtn" style="display:none;">Stop</button>
+    </div>
+  </div>
+
+  <div class="status" id="statusText"></div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--d00)"></span>D00 · Longitudinal Crack</span>
+    <span><span class="dot" style="background:var(--d10)"></span>D10 · Transverse Crack</span>
+    <span><span class="dot" style="background:var(--d20)"></span>D20 · Alligator Crack</span>
+    <span><span class="dot" style="background:var(--d40)"></span>D40 · Pothole</span>
+  </div>
+
+  <div class="detections" id="detectionsList"></div>
+</div>
+
+<footer>
+  Backend API: <span class="api-url" id="apiUrlDisplay">http://127.0.0.1:8000/predict</span>
+</footer>
+
+<script>
+// ====== CONFIG ======
+const API_URL = window.location.protocol.startsWith("http")
+  ? `${window.location.origin}/predict`
+  : "http://127.0.0.1:8000/predict";
+
+document.getElementById("apiUrlDisplay").textContent = API_URL;
+
+const CLASS_COLORS = {
+  "D00": "#4f8cff",
+  "D10": "#ffb547",
+  "D20": "#ff5c8a",
+  "D40": "#ff4444"
+};
+
+// ====== ELEMENTS ======
+const btnUploadMode = document.getElementById("btnUploadMode");
+const btnWebcamMode = document.getElementById("btnWebcamMode");
+const uploadPanel = document.getElementById("uploadPanel");
+const webcamPanel = document.getElementById("webcamPanel");
+
+const dropZone = document.getElementById("dropZone");
+const fileInput = document.getElementById("fileInput");
+const imgStage = document.getElementById("imgStage");
+const previewImg = document.getElementById("previewImg");
+const imgCanvas = document.getElementById("imgCanvas");
+const runImageBtn = document.getElementById("runImageBtn");
+const resetImageBtn = document.getElementById("resetImageBtn");
+
+const webcamStage = document.getElementById("webcamStage");
+const webcamVideo = document.getElementById("webcamVideo");
+const webcamCanvas = document.getElementById("webcamCanvas");
+const startWebcamBtn = document.getElementById("startWebcamBtn");
+const stopWebcamBtn = document.getElementById("stopWebcamBtn");
+
+const statusText = document.getElementById("statusText");
+const detectionsList = document.getElementById("detectionsList");
+
+let currentFile = null;
+let webcamStream = null;
+let webcamLoopId = null;
+
+// ====== MODE SWITCHING ======
+btnUploadMode.onclick = () => {
+  btnUploadMode.classList.add("active");
+  btnWebcamMode.classList.remove("active");
+  uploadPanel.style.display = "block";
+  webcamPanel.style.display = "none";
+  stopWebcam();
+  clearStatus();
+};
+
+btnWebcamMode.onclick = () => {
+  btnWebcamMode.classList.add("active");
+  btnUploadMode.classList.remove("active");
+  uploadPanel.style.display = "none";
+  webcamPanel.style.display = "block";
+  clearStatus();
+};
+
+// ====== UPLOAD MODE & DRAG-AND-DROP ======
+dropZone.onclick = () => fileInput.click();
+
+['dragenter', 'dragover'].forEach(eventName => {
+  dropZone.addEventListener(eventName, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.style.borderColor = "var(--accent)";
+    dropZone.style.background = "#1f2430";
+  }, false);
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+  dropZone.addEventListener(eventName, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.style.borderColor = "var(--border)";
+    dropZone.style.background = "transparent";
+  }, false);
+});
+
+dropZone.addEventListener('drop', (e) => {
+  const dt = e.dataTransfer;
+  const files = dt.files;
+  if (files && files.length > 0) {
+    handleFileSelect(files[0]);
+  }
+});
+
+fileInput.onchange = (e) => {
+  if (e.target.files && e.target.files[0]) {
+    handleFileSelect(e.target.files[0]);
+  }
+};
+
+function handleFileSelect(file) {
+  if (!file || !file.type.startsWith("image/")) {
+    setStatus("Please select a valid image file (JPG, PNG, etc.).", true);
+    return;
+  }
+  currentFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    previewImg.src = ev.target.result;
+    previewImg.onload = () => {
+      imgStage.classList.add("visible");
+      resizeCanvasToImage(imgCanvas, previewImg);
+      clearCanvas(imgCanvas);
+    };
+  };
+  reader.readAsDataURL(file);
+
+  runImageBtn.disabled = false;
+  resetImageBtn.style.display = "inline-block";
+  detectionsList.innerHTML = "";
+  clearStatus();
+}
+
+runImageBtn.onclick = async () => {
+  if (!currentFile) return;
+  await runDetection(currentFile, imgCanvas, previewImg.naturalWidth, previewImg.naturalHeight);
+};
+
+
+resetImageBtn.onclick = () => {
+  currentFile = null;
+  fileInput.value = "";
+  imgStage.classList.remove("visible");
+  runImageBtn.disabled = true;
+  resetImageBtn.style.display = "none";
+  detectionsList.innerHTML = "";
+  clearStatus();
+};
+
+// ====== WEBCAM MODE ======
+startWebcamBtn.onclick = async () => {
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    webcamVideo.srcObject = webcamStream;
+    startWebcamBtn.style.display = "none";
+    stopWebcamBtn.style.display = "inline-block";
+    setStatus("Webcam active — detecting every ~800ms...");
+
+    webcamVideo.onloadedmetadata = () => {
+      resizeCanvasToImage(webcamCanvas, webcamVideo);
+      webcamLoop();
+    };
+  } catch (err) {
+    setStatus("Could not access webcam: " + err.message, true);
+  }
+};
+
+stopWebcamBtn.onclick = stopWebcam;
+
+function stopWebcam() {
+  if (webcamLoopId) clearTimeout(webcamLoopId);
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+  startWebcamBtn.style.display = "inline-block";
+  stopWebcamBtn.style.display = "none";
+  clearCanvas(webcamCanvas);
+}
+
+async function webcamLoop() {
+  if (!webcamStream) return;
+
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = webcamVideo.videoWidth;
+  tempCanvas.height = webcamVideo.videoHeight;
+  const ctx = tempCanvas.getContext("2d");
+  ctx.drawImage(webcamVideo, 0, 0, tempCanvas.width, tempCanvas.height);
+
+  tempCanvas.toBlob(async (blob) => {
+    if (blob) {
+      await runDetection(blob, webcamCanvas, tempCanvas.width, tempCanvas.height, true);
+    }
+    webcamLoopId = setTimeout(webcamLoop, 800); // ~800ms between frames
+  }, "image/jpeg", 0.8);
+}
+
+// ====== SHARED: CALL API + DRAW ======
+async function runDetection(fileOrBlob, canvas, imgWidth, imgHeight, isWebcam = false) {
+  if (!isWebcam) setStatus("Detecting defects...");
+
+  const formData = new FormData();
+  formData.append("file", fileOrBlob, "frame.jpg");
+
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: formData });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    const data = await res.json();
+
+    drawBoxes(canvas, data.detections, imgWidth, imgHeight);
+    if (!isWebcam) {
+      renderDetectionsList(data.detections);
+      setStatus(`Found ${data.detections.length} detection(s).`);
+    }
+  } catch (err) {
+    setStatus("Prediction failed: " + err.message + " — is the API running at " + API_URL + "?", true);
+  }
+}
+
+function drawBoxes(canvas, detections, imgWidth, imgHeight) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!detections || detections.length === 0) return;
+
+  const scaleX = canvas.width / imgWidth;
+  const scaleY = canvas.height / imgHeight;
+
+  detections.forEach(det => {
+    const [x1, y1, x2, y2] = det.bbox;
+    const color = CLASS_COLORS[det.class] || "#4f8cff";
+    const bx = x1 * scaleX, by = y1 * scaleY;
+    const bw = (x2 - x1) * scaleX, bh = (y2 - y1) * scaleY;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    const label = `${det.class} ${(det.confidence * 100).toFixed(0)}%`;
+    ctx.font = "bold 13px Segoe UI, sans-serif";
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, Math.max(by - 20, 0), textWidth + 10, 20);
+    ctx.fillStyle = "#0f1115";
+    ctx.fillText(label, bx + 5, Math.max(by - 6, 14));
+  });
+}
+
+function renderDetectionsList(detections) {
+  detectionsList.innerHTML = "";
+  if (!detections || detections.length === 0) {
+    detectionsList.innerHTML = `<div class="det-row"><span>No defects detected</span></div>`;
+    return;
+  }
+  detections.forEach(det => {
+    const row = document.createElement("div");
+    row.className = "det-row";
+    row.innerHTML = `<span class="cls" style="color:${CLASS_COLORS[det.class] || '#fff'}">${det.class}</span>
+                      <span class="conf">${(det.confidence * 100).toFixed(1)}% confidence</span>`;
+    detectionsList.appendChild(row);
+  });
+}
+
+// ====== UTIL ======
+function resizeCanvasToImage(canvas, mediaEl) {
+  const rect = mediaEl.getBoundingClientRect();
+  canvas.width = mediaEl.naturalWidth || mediaEl.videoWidth || rect.width;
+  canvas.height = mediaEl.naturalHeight || mediaEl.videoHeight || rect.height;
+}
+
+function clearCanvas(canvas) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function setStatus(msg, isError = false) {
+  statusText.textContent = msg;
+  statusText.classList.toggle("error", isError);
+}
+
+function clearStatus() {
+  statusText.textContent = "";
+  statusText.classList.remove("error");
+}
+</script>
+
+</body>
+</html>
