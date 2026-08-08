@@ -234,9 +234,7 @@
 
 <script>
 // ====== CONFIG ======
-const API_URL = window.location.protocol.startsWith("http")
-  ? `${window.location.origin}/predict`
-  : "http://127.0.0.1:8000/predict";
+const API_URL = "https://road-d-2.onrender.com/predict";
 
 document.getElementById("apiUrlDisplay").textContent = API_URL;
 
